@@ -1,0 +1,27 @@
+[package]
+name = "subsonic"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+reqwest = { version = "0.11", features = ["json"] }
+semver = "1.0"
+rand = "0.8"
+md5 = "0.7"
+
+serde_json = "1.0"
+
+[dev-dependencies]
+tokio = { version = "1.17", features = ["full"] }
+dotenv = "0.15"
+envy = "0.4"
+serde_json = "1.0"
+
+[build-dependencies]
+xmltree = "0.10"
+quote = "1.0"
+proc-macro2 = "1.0"
+Inflector = "0.11"
