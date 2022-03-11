@@ -19,17 +19,11 @@ fn main() {
                     match element.children.into_iter().next().unwrap() {
                         xmltree::XMLNode::Element(element) => {
                             let restriction = element.attributes.get("base").unwrap();
-                            match restriction.as_str() {
-                                "xs:int" => output.push(format!(
-                                    "#[derive(Debug, serde::Deserialize)] pub struct {}(std::ops::RangeInclusive<i32>);",
-                                    name
-                                )),
-                                "xs:double" => output.push(format!(
-                                    "#[derive(Debug, serde::Deserialize)] pub struct {}(std::ops::RangeInclusive<f64>);",
-                                    name
-                                )),
-                                _ => output.push(format!(r#"#[derive(Debug, serde::Deserialize)] pub struct {};"#, name)),
-                            }
+                            let ty = xml_type_to_ident(restriction.as_str()).unwrap();
+                            output.push(format!(
+                                "#[derive(Debug, serde::Deserialize)] pub struct {}({});",
+                                name, ty
+                            ))
                         }
                         _ => panic!(),
                     }
@@ -141,33 +135,60 @@ fn main() {
                                         }
                                     }
                                     "sequence" => {
-                                        let first = element
+                                        let elements = element
                                             .children
                                             .into_iter()
                                             .filter_map(only_elements)
-                                            .next()
-                                            .unwrap();
+                                            .collect::<Vec<_>>();
 
-                                        let name = first.attributes.get("name").unwrap();
-                                        let xml_ty = first.attributes.get("type").unwrap();
-                                        let ty = xml_type_to_ident(xml_ty).unwrap();
+                                        if elements.len() == 1 {
+                                            let first = elements.into_iter().next().unwrap();
+                                            let name = first.attributes.get("name").unwrap();
+                                            let xml_ty = first.attributes.get("type").unwrap();
+                                            let ty = xml_type_to_ident(xml_ty).unwrap();
 
-                                        if name == "match" {
-                                            quote! {
-                                                #[serde(rename = "match")]
-                                                pub matches: Vec<#ty>
-                                            }
-                                        } else if !is_snake_case(name) {
-                                            let original_name = name;
-                                            let name = format_ident!("{}", to_snake_case(name));
-                                            quote! {
-                                                #[serde(rename = #original_name)]
-                                                pub #name: Vec<#ty>
+                                            if name == "match" {
+                                                quote! {
+                                                    #[serde(rename = "match")]
+                                                    pub matches: Vec<#ty>
+                                                }
+                                            } else if !is_snake_case(name) {
+                                                let original_name = name;
+                                                let name = format_ident!("{}", to_snake_case(name));
+                                                quote! {
+                                                    #[serde(rename = #original_name)]
+                                                    pub #name: Vec<#ty>
+                                                }
+                                            } else {
+                                                let name = format_ident!("{}", name);
+                                                quote! {
+                                                    pub #name: Vec<#ty>
+                                                }
                                             }
                                         } else {
-                                            let name = format_ident!("{}", name);
-                                            quote! {
-                                                pub #name: Vec<#ty>
+                                            let first =
+                                                elements.into_iter().skip(1).next().unwrap();
+                                            let name = first.attributes.get("name").unwrap();
+                                            let xml_ty = first.attributes.get("type").unwrap();
+                                            let ty = xml_type_to_ident(xml_ty).unwrap();
+
+                                            if name == "match" {
+                                                quote! {
+                                                    #[serde(rename = "match")]
+                                                    pub matches: Vec<#ty>
+                                                }
+                                            } else if !is_snake_case(name) {
+                                                let original_name = name;
+                                                let name = format_ident!("{}", to_snake_case(name));
+                                                quote! {
+                                                    #[serde(rename = #original_name)]
+                                                    pub #name: Vec<#ty>
+                                                }
+                                            } else {
+                                                let name = format_ident!("{}", name);
+                                                quote! {
+                                                    pub #name: Vec<#ty>
+                                                }
                                             }
                                         }
                                     }
