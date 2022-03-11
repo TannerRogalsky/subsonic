@@ -187,59 +187,18 @@ mod tests {
         dotenv::dotenv().unwrap();
         let config: Config = envy::prefixed("SUBSONIC_").from_env().unwrap();
 
-        #[derive(Debug, serde::Deserialize)]
-        struct ArtistWithAlbumsContainer {
-            artist: ArtistWithAlbums,
-        }
-
-        #[derive(Debug, serde::Deserialize)]
-        struct ArtistWithAlbums {
-            album: Vec<api::AlbumID3>,
-            #[serde(flatten)]
-            artist: api::ArtistID3,
-        }
-
-        #[derive(Debug, serde::Deserialize)]
-        struct AlbumWithSongContainer {
-            album: AlbumWithSongsID3,
-        }
-
-        #[derive(Debug, serde::Deserialize)]
-        struct AlbumWithSongsID3 {
-            song: Vec<api::Child>,
-            #[serde(flatten)]
-            album: api::AlbumID3,
-        }
-
         let client = Client::new(config.url, config.user, config.password).unwrap();
         let indexes = api::Indexes::get(&client).await.unwrap().result.unwrap();
-        // let artist = api::ArtistWithAlbumsID3::get(&client, &indexes.index[0].artist[0].id).await.unwrap().result.unwrap();
-        // println!("{:#?}", artist);
-        let artist = client
-            .get("getArtist")
-            .query(&[("id", &indexes.index[0].artist[0].id)])
-            .send()
+        let artist = api::ArtistWithAlbumsID3::get(&client, &indexes.index[0].artist[0].id)
             .await
             .unwrap()
-            .json::<api::GenericSubsonicResponse<ArtistWithAlbumsContainer>>()
+            .result
+            .unwrap();
+        let album = api::AlbumWithSongsID3::get(&client, &artist.album[0].id)
             .await
             .unwrap()
-            .subsonic_response
-            .content
-            .artist;
-        println!("{:#?}", artist);
-        let album = client
-            .get("getAlbum")
-            .query(&[("id", &indexes.index[0].artist[0].id)])
-            .send()
-            .await
-            .unwrap()
-            .json::<api::GenericSubsonicResponse<AlbumWithSongContainer>>()
-            .await
-            .unwrap()
-            .subsonic_response
-            .content
-            .album;
+            .result
+            .unwrap();
         println!("{:#?}", album);
     }
 

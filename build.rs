@@ -5,6 +5,7 @@ fn main() {
     let schema_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("schemas")
         .join("subsonic-rest-api-1.16.1.xsd");
+    println!("cargo:rerun-if-changed=schemas/subsonic-rest-api-1.16.1.xsd");
     let schema = xmltree::Element::parse(std::fs::File::open(schema_path).unwrap()).unwrap();
 
     let mut output = vec![];
@@ -12,14 +13,14 @@ fn main() {
         if let xmltree::XMLNode::Element(element) = node {
             match element.name.as_str() {
                 "element" => {
-                    // todo
+                    // see GenericSubsonicResponse in lib.rs
                 }
                 "simpleType" => {
                     let name = element.attributes.get("name").unwrap();
                     match element.children.into_iter().next().unwrap() {
                         xmltree::XMLNode::Element(element) => {
                             let restriction = element.attributes.get("base").unwrap();
-                            let ty = xml_type_to_ident(restriction.as_str()).unwrap();
+                            let ty = xml_type_to_ident(restriction);
                             output.push(format!(
                                 "#[derive(Debug, serde::Deserialize)] pub struct {}({});",
                                 name, ty
@@ -43,7 +44,7 @@ fn main() {
                                 .map(|mut element| {
                                     let original_name = element.attributes.remove("name").unwrap();
                                     let xml_ty = element.attributes.remove("type").unwrap();
-                                    let ty = xml_type_to_ident(&xml_ty).unwrap();
+                                    let ty = xml_type_to_ident(&xml_ty);
                                     let name = format_ident!(
                                         "{}",
                                         inflector::cases::pascalcase::to_pascal_case(
@@ -93,115 +94,45 @@ fn main() {
                             continue;
                         }
 
-                        let fields =
-                            element
-                                .children
-                                .into_iter()
-                                .filter_map(only_elements)
-                                .map(|element| match element.name.as_str() {
-                                    "attribute" => {
-                                        let name = element.attributes.get("name").unwrap();
-                                        let ty = element.attributes.get("type").unwrap();
-                                        let required =
-                                            match element.attributes.get("use").unwrap().as_str() {
-                                                "required" => true,
-                                                "optional" => false,
-                                                _ => panic!(),
-                                            };
+                        let fields = element
+                            .children
+                            .into_iter()
+                            .filter_map(only_elements)
+                            .flat_map(|element| match element.name.as_str() {
+                                "attribute" | "sequence" => vec![gen_field(element)],
+                                "complexContent" => {
+                                    let base = element
+                                        .children
+                                        .into_iter()
+                                        .filter_map(only_elements)
+                                        .next()
+                                        .unwrap();
+                                    let base_xml_ty = base.attributes.get("base").unwrap();
 
-                                        let ty = if required {
-                                            xml_type_to_ident(ty).unwrap().to_token_stream()
-                                        } else {
-                                            let ty = xml_type_to_ident(ty).unwrap();
-                                            quote!(Option<#ty>)
-                                        };
-                                        if name == "type" {
-                                            quote! {
-                                                #[serde(rename = "type")]
-                                                pub ty: #ty
-                                            }
-                                        } else if !is_snake_case(name) {
-                                            let original_name = name;
-                                            let name = format_ident!("{}", to_snake_case(name));
-                                            quote! {
-                                                #[serde(rename = #original_name)]
-                                                pub #name: #ty
-                                            }
-                                        } else {
-                                            let name = format_ident!("{}", name);
-                                            quote! {
-                                                pub #name: #ty
-                                            }
-                                        }
+                                    let field = GenNamedFieldConfig {
+                                        name: &String::from("base"),
+                                        ty: base_xml_ty,
+                                        is_required: true,
+                                        is_vec: false,
                                     }
-                                    "sequence" => {
-                                        let elements = element
-                                            .children
+                                    .to_token_stream();
+
+                                    let mut fields = vec![quote! {
+                                        #[serde(flatten)]
+                                        #field
+                                    }];
+                                    fields.extend(
+                                        base.children
                                             .into_iter()
                                             .filter_map(only_elements)
-                                            .collect::<Vec<_>>();
-
-                                        if elements.len() == 1 {
-                                            let first = elements.into_iter().next().unwrap();
-                                            let name = first.attributes.get("name").unwrap();
-                                            let xml_ty = first.attributes.get("type").unwrap();
-                                            let ty = xml_type_to_ident(xml_ty).unwrap();
-
-                                            if name == "match" {
-                                                quote! {
-                                                    #[serde(rename = "match")]
-                                                    pub matches: Vec<#ty>
-                                                }
-                                            } else if !is_snake_case(name) {
-                                                let original_name = name;
-                                                let name = format_ident!("{}", to_snake_case(name));
-                                                quote! {
-                                                    #[serde(rename = #original_name)]
-                                                    pub #name: Vec<#ty>
-                                                }
-                                            } else {
-                                                let name = format_ident!("{}", name);
-                                                quote! {
-                                                    pub #name: Vec<#ty>
-                                                }
-                                            }
-                                        } else {
-                                            let first =
-                                                elements.into_iter().skip(1).next().unwrap();
-                                            let name = first.attributes.get("name").unwrap();
-                                            let xml_ty = first.attributes.get("type").unwrap();
-                                            let ty = xml_type_to_ident(xml_ty).unwrap();
-
-                                            if name == "match" {
-                                                quote! {
-                                                    #[serde(rename = "match")]
-                                                    pub matches: Vec<#ty>
-                                                }
-                                            } else if !is_snake_case(name) {
-                                                let original_name = name;
-                                                let name = format_ident!("{}", to_snake_case(name));
-                                                quote! {
-                                                    #[serde(rename = #original_name)]
-                                                    pub #name: Vec<#ty>
-                                                }
-                                            } else {
-                                                let name = format_ident!("{}", name);
-                                                quote! {
-                                                    pub #name: Vec<#ty>
-                                                }
-                                            }
-                                        }
-                                    }
-                                    "complexContent" => {
-                                        quote! {
-                                            #[serde(flatten)]
-                                            pub placeholder: serde_json::Value,
-                                        }
-                                    }
-                                    _ => {
-                                        unimplemented!("{}", element.name);
-                                    }
-                                });
+                                            .map(gen_field),
+                                    );
+                                    fields
+                                }
+                                _ => {
+                                    unimplemented!("{}", element.name);
+                                }
+                            });
 
                         let name = format_ident!("{}", name);
                         output.push(
@@ -233,9 +164,9 @@ fn only_elements(node: xmltree::XMLNode) -> Option<xmltree::Element> {
     }
 }
 
-fn xml_type_to_ident(xml: &str) -> Option<proc_macro2::Ident> {
+fn xml_type_to_ident(xml: &str) -> proc_macro2::Ident {
     if xml.starts_with("sub:") {
-        return Some(format_ident!("{}", xml.trim_start_matches("sub:")));
+        return format_ident!("{}", xml.trim_start_matches("sub:"));
     }
 
     let ident = match xml {
@@ -247,9 +178,102 @@ fn xml_type_to_ident(xml: &str) -> Option<proc_macro2::Ident> {
         "xs:float" => "f32",
         "xs:double" => "f64",
         _ => {
-            println!("Type Not Found: {}", xml);
-            return None;
+            panic!("Type Not Found: {}", xml)
         }
     };
-    Some(format_ident!("{}", ident))
+    format_ident!("{}", ident)
+}
+
+fn accept_as_ident(ident: &str) -> bool {
+    match ident {
+        "_" |
+        // Based on https://doc.rust-lang.org/grammar.html#keywords
+        // and https://github.com/rust-lang/rfcs/blob/master/text/2421-unreservations-2018.md
+        // and https://github.com/rust-lang/rfcs/blob/master/text/2420-unreserve-proc.md
+        "abstract" | "as" | "become" | "box" | "break" | "const" | "continue" |
+        "crate" | "do" | "else" | "enum" | "extern" | "false" | "final" | "fn" |
+        "for" | "if" | "impl" | "in" | "let" | "loop" | "macro" | "match" |
+        "mod" | "move" | "mut" | "override" | "priv" | "pub" | "ref" |
+        "return" | "Self" | "self" | "static" | "struct" | "super" | "trait" |
+        "true" | "type" | "typeof" | "unsafe" | "unsized" | "use" | "virtual" |
+        "where" | "while" | "yield" => false,
+        _ => true,
+    }
+}
+
+fn gen_field(element: xmltree::Element) -> proc_macro2::TokenStream {
+    let (element, is_vec) = if element.name == "sequence" {
+        let elements = element
+            .children
+            .into_iter()
+            .filter_map(only_elements)
+            .collect::<Vec<_>>();
+        let element = if elements.len() == 1 {
+            elements.into_iter().next().unwrap()
+        } else {
+            elements.into_iter().skip(1).next().unwrap()
+        };
+        (element, true)
+    } else {
+        (element, false)
+    };
+
+    let is_required = element
+        .attributes
+        .get("use")
+        .map(|attr| match attr.as_str() {
+            "required" => true,
+            "optional" => false,
+            _ => panic!(),
+        })
+        .unwrap_or(true);
+
+    let config = GenNamedFieldConfig {
+        name: element.attributes.get("name").unwrap(),
+        ty: element.attributes.get("type").unwrap(),
+        is_required,
+        is_vec,
+    };
+
+    config.to_token_stream()
+}
+
+struct GenNamedFieldConfig<'a> {
+    name: &'a String,
+    ty: &'a String,
+    is_required: bool,
+    is_vec: bool,
+}
+
+impl GenNamedFieldConfig<'_> {
+    fn to_token_stream(self) -> proc_macro2::TokenStream {
+        let ty = xml_type_to_ident(self.ty).to_token_stream();
+        let ty = if self.is_vec { quote!(Vec<#ty>) } else { ty };
+        let ty = if !self.is_required {
+            quote!(Option<#ty>)
+        } else {
+            ty
+        };
+
+        if !accept_as_ident(self.name) {
+            let original_name = self.name;
+            let name = format_ident!("{}_subsonic", original_name);
+            quote! {
+                #[serde(rename = #original_name)]
+                pub #name: #ty
+            }
+        } else if !is_snake_case(self.name) {
+            let original_name = self.name;
+            let name = format_ident!("{}", to_snake_case(original_name));
+            quote! {
+                #[serde(rename = #original_name)]
+                pub #name: #ty
+            }
+        } else {
+            let name = format_ident!("{}", self.name);
+            quote! {
+                pub #name: #ty
+            }
+        }
+    }
 }
