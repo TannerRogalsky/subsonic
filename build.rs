@@ -208,40 +208,60 @@ fn accept_as_ident(ident: &str) -> bool {
 }
 
 fn gen_field(element: xmltree::Element) -> proc_macro2::TokenStream {
-    let (element, is_vec) = if element.name == "sequence" {
-        let elements = element
+    fn inner(
+        element: xmltree::Element,
+        mut is_required: bool,
+        is_vec: bool,
+    ) -> proc_macro2::TokenStream {
+        if is_vec {
+            is_required = true;
+        }
+
+        let config = GenNamedFieldConfig {
+            name: element.attributes.get("name").unwrap(),
+            ty: element.attributes.get("type").unwrap(),
+            is_required,
+            is_vec,
+        };
+
+        config.to_token_stream()
+    }
+
+    if element.name == "sequence" {
+        let tokens = element
             .children
             .into_iter()
             .filter_map(only_elements)
-            .collect::<Vec<_>>();
-        let element = if elements.len() == 1 {
-            elements.into_iter().next().unwrap()
-        } else {
-            elements.into_iter().skip(1).next().unwrap()
-        };
-        (element, true)
+            .map(|element| {
+                let is_vec = element.attributes["maxOccurs"] == "unbounded";
+                let is_required = element.attributes["minOccurs"] != "0";
+                let field = inner(element, is_required, is_vec);
+                if is_required {
+                    quote! {
+                        #field
+                    }
+                } else {
+                    quote! {
+                        #[serde(default)]
+                        #field
+                    }
+                }
+            });
+        quote! {
+            #(#tokens),*
+        }
     } else {
-        (element, false)
-    };
-
-    let is_required = element
-        .attributes
-        .get("use")
-        .map(|attr| match attr.as_str() {
-            "required" => true,
-            "optional" => false,
-            _ => panic!(),
-        })
-        .unwrap_or(true);
-
-    let config = GenNamedFieldConfig {
-        name: element.attributes.get("name").unwrap(),
-        ty: element.attributes.get("type").unwrap(),
-        is_required,
-        is_vec,
-    };
-
-    config.to_token_stream()
+        let is_required = element
+            .attributes
+            .get("use")
+            .map(|attr| match attr.as_str() {
+                "required" => true,
+                "optional" => false,
+                _ => panic!(),
+            })
+            .unwrap_or(true);
+        inner(element, is_required, false)
+    }
 }
 
 struct GenNamedFieldConfig<'a> {

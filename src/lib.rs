@@ -30,7 +30,7 @@ impl Client {
         base_url: U,
         user: String,
         password: String,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> std::result::Result<Self, Box<dyn std::error::Error>> {
         let base_url = base_url.into_url()?;
         let auth = Auth { user, password };
         // TODO: pull from API
@@ -43,7 +43,7 @@ impl Client {
         })
     }
 
-    pub async fn ping(&self) -> reqwest::Result<bool> {
+    pub async fn ping(&self) -> Result<bool> {
         let response = self
             .get("ping")
             .send()
@@ -112,6 +112,8 @@ impl Auth {
     }
 }
 
+pub type Result<T> = reqwest::Result<T>;
+
 #[derive(Debug)]
 pub enum SubsonicResponseError {
     ApiError(api::Error),
@@ -127,14 +129,22 @@ impl From<api::Response> for SubsonicResponseError {
     }
 }
 
+impl std::fmt::Display for SubsonicResponseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for SubsonicResponseError {}
+
 #[derive(Debug)]
 pub struct SubsonicResponse<T> {
     pub version: String,
-    pub result: Result<T, SubsonicResponseError>,
+    pub result: std::result::Result<T, SubsonicResponseError>,
 }
 
 impl api::Indexes {
-    pub async fn get(client: &Client) -> reqwest::Result<SubsonicResponse<Self>> {
+    pub async fn get(client: &Client) -> Result<SubsonicResponse<Self>> {
         Ok(client
             .get("getIndexes")
             .send()
@@ -146,10 +156,10 @@ impl api::Indexes {
 }
 
 impl api::ArtistWithAlbumsID3 {
-    pub async fn get(client: &Client, id: &str) -> reqwest::Result<SubsonicResponse<Self>> {
+    pub async fn get<ID: AsRef<str>>(client: &Client, id: ID) -> Result<SubsonicResponse<Self>> {
         Ok(client
             .get("getArtist")
-            .query(&[("id", id)])
+            .query(&[("id", id.as_ref())])
             .send()
             .await?
             .json::<api::SubsonicResponse>()
@@ -159,15 +169,37 @@ impl api::ArtistWithAlbumsID3 {
 }
 
 impl api::AlbumWithSongsID3 {
-    pub async fn get(client: &Client, id: &str) -> reqwest::Result<SubsonicResponse<Self>> {
+    pub async fn get<ID: AsRef<str>>(client: &Client, id: ID) -> Result<SubsonicResponse<Self>> {
         Ok(client
             .get("getAlbum")
-            .query(&[("id", id)])
+            .query(&[("id", id.as_ref())])
             .send()
             .await?
             .json::<api::SubsonicResponse>()
             .await?
             .into())
+    }
+}
+
+impl api::AlbumInfo {
+    pub async fn get<ID: AsRef<str>>(client: &Client, id: ID) -> Result<SubsonicResponse<Self>> {
+        Ok(client
+            .get("getAlbumInfo")
+            .query(&[("id", id.as_ref())])
+            .send()
+            .await?
+            .json::<api::SubsonicResponse>()
+            .await?
+            .into())
+    }
+}
+
+impl api::Child {
+    pub fn download_request(&self, client: &Client) -> Result<reqwest::Request> {
+        client
+            .get("download")
+            .query(&[("id", self.id.as_str())])
+            .build()
     }
 }
 
@@ -180,26 +212,6 @@ mod tests {
         user: String,
         password: String,
         url: String,
-    }
-
-    #[tokio::test]
-    async fn stream() {
-        dotenv::dotenv().unwrap();
-        let config: Config = envy::prefixed("SUBSONIC_").from_env().unwrap();
-
-        let client = Client::new(config.url, config.user, config.password).unwrap();
-        let indexes = api::Indexes::get(&client).await.unwrap().result.unwrap();
-        let artist = api::ArtistWithAlbumsID3::get(&client, &indexes.index[0].artist[0].id)
-            .await
-            .unwrap()
-            .result
-            .unwrap();
-        let album = api::AlbumWithSongsID3::get(&client, &artist.album[0].id)
-            .await
-            .unwrap()
-            .result
-            .unwrap();
-        println!("{:#?}", album);
     }
 
     #[tokio::test]
@@ -228,5 +240,30 @@ mod tests {
             .unwrap()
             .into();
         assert!(response.result.is_ok())
+    }
+
+    #[tokio::test]
+    async fn get_album() {
+        dotenv::dotenv().unwrap();
+        let config: Config = envy::prefixed("SUBSONIC_").from_env().unwrap();
+
+        let client = Client::new(config.url, config.user, config.password).unwrap();
+        let indexes = api::Indexes::get(&client).await.unwrap().result.unwrap();
+        let artist = api::ArtistWithAlbumsID3::get(&client, &indexes.index[0].artist[0].id)
+            .await
+            .unwrap()
+            .result
+            .unwrap();
+        let album = api::AlbumWithSongsID3::get(&client, &artist.album[0].id)
+            .await
+            .unwrap()
+            .result
+            .unwrap();
+        assert!(!album.song.is_empty());
+        let album_info = api::AlbumInfo::get(&client, &artist.album[0].id)
+            .await
+            .unwrap()
+            .result;
+        assert!(album_info.is_ok());
     }
 }
