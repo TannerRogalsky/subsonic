@@ -63,7 +63,13 @@ fn main() {
                             });
 
                             let conversions = field_data.iter().filter_map(|(_, name, ty)| {
-                                if name == "Error" {
+                                if name == "Error"
+                                    || name == "RandomSongs"
+                                    || name == "SongsByGenre"
+                                {
+                                    // error conversion is handled automatically
+                                    // RandomSongs and SongsByGenre both supertype `Songs` and so
+                                    // can't be automatically converted by sub type
                                     return None;
                                 }
                                 Some(quote! {

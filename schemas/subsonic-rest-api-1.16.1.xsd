@@ -35,6 +35,7 @@
             <xs:element name="albumList" type="sub:AlbumList" minOccurs="1" maxOccurs="1"/>
             <xs:element name="albumList2" type="sub:AlbumList2" minOccurs="1" maxOccurs="1"/>
             <xs:element name="randomSongs" type="sub:Songs" minOccurs="1" maxOccurs="1"/>
+            <xs:element name="songsByGenre" type="sub:Songs" minOccurs="1" maxOccurs="1"/>
             <xs:element name="lyrics" type="sub:Lyrics" minOccurs="1" maxOccurs="1"/>
             <xs:element name="podcasts" type="sub:Podcasts" minOccurs="1" maxOccurs="1"/>
             <xs:element name="newestPodcasts" type="sub:NewestPodcasts" minOccurs="1" maxOccurs="1"/>
