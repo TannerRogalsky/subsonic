@@ -25,6 +25,16 @@ pub struct Client {
     version: semver::Version,
 }
 
+impl std::fmt::Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("Client")
+            .field("base_url", &self.base_url)
+            .field("auth", &self.auth)
+            .field("version", &self.version)
+            .finish()
+    }
+}
+
 impl Client {
     pub fn new<U: reqwest::IntoUrl>(
         base_url: U,
@@ -63,11 +73,36 @@ impl Client {
             .extend_pairs(self.auth.to_query(&self.version));
         self.inner.get(url)
     }
+
+    fn get_with_params<P: serde::Serialize>(
+        &self,
+        query: &str,
+        params: &P,
+    ) -> reqwest::RequestBuilder {
+        let mut url = self
+            .base_url
+            .join("rest/")
+            .and_then(|url| url.join(query))
+            .unwrap();
+        url.query_pairs_mut()
+            .extend_pairs(self.auth.to_query(&self.version))
+            .append_key_only(&serde_qs::to_string(params).unwrap());
+        self.inner.get(url)
+    }
 }
 
 struct Auth {
     user: String,
     password: String,
+}
+
+impl std::fmt::Debug for Auth {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("Auth")
+            .field("user", &self.user)
+            .field("password", &"<secret>")
+            .finish()
+    }
 }
 
 impl Auth {
@@ -143,10 +178,100 @@ pub struct SubsonicResponse<T> {
     pub result: std::result::Result<T, SubsonicResponseError>,
 }
 
+impl api::License {
+    pub async fn get(client: &Client) -> Result<SubsonicResponse<Self>> {
+        Ok(client
+            .get("getLicense")
+            .send()
+            .await?
+            .json::<api::SubsonicResponse>()
+            .await?
+            .into())
+    }
+}
+
+impl api::MusicFolders {
+    pub async fn get(client: &Client) -> Result<SubsonicResponse<Self>> {
+        Ok(client
+            .get("getMusicFolders")
+            .send()
+            .await?
+            .json::<api::SubsonicResponse>()
+            .await?
+            .into())
+    }
+}
+
+#[derive(Debug, Default, serde::Serialize)]
+pub struct IndexesConfig<'a> {
+    #[serde(rename = "musicFolderId")]
+    pub music_folder_id: Option<std::borrow::Cow<'a, str>>,
+    #[serde(rename = "ifModifiedSince")]
+    pub if_modified_since: Option<u64>,
+}
+
 impl api::Indexes {
     pub async fn get(client: &Client) -> Result<SubsonicResponse<Self>> {
         Ok(client
             .get("getIndexes")
+            .send()
+            .await?
+            .json::<api::SubsonicResponse>()
+            .await?
+            .into())
+    }
+
+    pub async fn get_with_config(
+        client: &Client,
+        config: &IndexesConfig<'_>,
+    ) -> Result<SubsonicResponse<Self>> {
+        Ok(client
+            .get_with_params("getIndexes", &config)
+            .send()
+            .await?
+            .json::<api::SubsonicResponse>()
+            .await?
+            .into())
+    }
+}
+
+impl api::Directory {
+    pub async fn get<ID: AsRef<str>>(client: &Client, id: ID) -> Result<SubsonicResponse<Self>> {
+        Ok(client
+            .get("getMusicDirectory")
+            .query(&[("id", id.as_ref())])
+            .send()
+            .await?
+            .json::<api::SubsonicResponse>()
+            .await?
+            .into())
+    }
+}
+
+impl api::Genres {
+    pub async fn get(client: &Client) -> Result<SubsonicResponse<Self>> {
+        Ok(client
+            .get("getGenres")
+            .send()
+            .await?
+            .json::<api::SubsonicResponse>()
+            .await?
+            .into())
+    }
+}
+
+impl api::ArtistsID3 {
+    pub async fn get<ID: AsRef<str>>(
+        client: &Client,
+        music_folder_id: Option<ID>,
+    ) -> Result<SubsonicResponse<Self>> {
+        let req = client.get("getArtists");
+        let req = if let Some(music_folder_id) = music_folder_id {
+            req.query(&[("musicFolderId", music_folder_id.as_ref())])
+        } else {
+            req
+        };
+        Ok(req
             .send()
             .await?
             .json::<api::SubsonicResponse>()
@@ -181,6 +306,70 @@ impl api::AlbumWithSongsID3 {
     }
 }
 
+impl api::Child {
+    pub async fn get<ID: AsRef<str>>(client: &Client, id: ID) -> Result<SubsonicResponse<Self>> {
+        Ok(client
+            .get("getSong")
+            .query(&[("id", id.as_ref())])
+            .send()
+            .await?
+            .json::<api::SubsonicResponse>()
+            .await?
+            .into())
+    }
+}
+
+impl api::Videos {
+    pub async fn get(client: &Client) -> Result<SubsonicResponse<Self>> {
+        Ok(client
+            .get("getVideos")
+            .send()
+            .await?
+            .json::<api::SubsonicResponse>()
+            .await?
+            .into())
+    }
+}
+
+impl api::VideoInfo {
+    pub async fn get<ID: AsRef<str>>(client: &Client, id: ID) -> Result<SubsonicResponse<Self>> {
+        Ok(client
+            .get("getVideoInfo")
+            .query(&[("id", id.as_ref())])
+            .send()
+            .await?
+            .json::<api::SubsonicResponse>()
+            .await?
+            .into())
+    }
+}
+
+impl api::ArtistInfo {
+    pub async fn get<ID: AsRef<str>>(client: &Client, id: ID) -> Result<SubsonicResponse<Self>> {
+        Ok(client
+            .get("getArtistInfo")
+            .query(&[("id", id.as_ref())])
+            .send()
+            .await?
+            .json::<api::SubsonicResponse>()
+            .await?
+            .into())
+    }
+}
+
+impl api::ArtistInfo2 {
+    pub async fn get<ID: AsRef<str>>(client: &Client, id: ID) -> Result<SubsonicResponse<Self>> {
+        Ok(client
+            .get("getArtistInfo2")
+            .query(&[("id", id.as_ref())])
+            .send()
+            .await?
+            .json::<api::SubsonicResponse>()
+            .await?
+            .into())
+    }
+}
+
 impl api::AlbumInfo {
     pub async fn get<ID: AsRef<str>>(client: &Client, id: ID) -> Result<SubsonicResponse<Self>> {
         Ok(client
@@ -192,9 +381,28 @@ impl api::AlbumInfo {
             .await?
             .into())
     }
+
+    pub async fn get_id3<ID: AsRef<str>>(
+        client: &Client,
+        id: ID,
+    ) -> Result<SubsonicResponse<Self>> {
+        Ok(client
+            .get("getAlbumInfo2")
+            .query(&[("id", id.as_ref())])
+            .send()
+            .await?
+            .json::<api::SubsonicResponse>()
+            .await?
+            .into())
+    }
 }
 
 impl api::Child {
+    pub async fn download(&self, client: &Client) -> Result<reqwest::Response> {
+        let request = self.download_request(client)?;
+        client.inner.execute(request).await
+    }
+
     pub fn download_request(&self, client: &Client) -> Result<reqwest::Request> {
         client
             .get("download")
